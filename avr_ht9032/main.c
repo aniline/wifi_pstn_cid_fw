@@ -290,12 +290,12 @@ void waitForFirstRing() {
 
     /* At some point between 15-20 uS, the _PIN check jumps over and messes with the 'states'
      * Using _delay_us, for porting to non-arduino AVR code. */
-    _delay_ms(1);
+    _delay_ms(50); /* Crude debounce */
 
     while (_PIN & RING_BIT); /* Ring end */
     _PORT &= DEB_OFF;
 
-    _delay_ms(200);
+    _delay_ms(200); /* Delay into the 'mark' 1-bits */
 
     _PORT |= DEB_ON;
     if (_PIN & RING_BIT) {
@@ -309,7 +309,7 @@ void waitForFirstRing() {
       if (((s - last_call_first_ring) > 3) &&
 	  ((s - last_call_last_ring) > 3)) {
         _delay_us(20);
-        last_call_first_ring = s;
+        last_call_first_ring = last_call_last_ring = s;
         _PORT &= DEB_OFF;
         isFirst = 1;
 #ifdef DEBUG

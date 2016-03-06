@@ -6,6 +6,10 @@ AVRDUDE_OPTS	=-B3
 AVRDUDE		=avrdude
 EXTRA_DEFINES   =-DF_CPU=8000000UL # -DDEBUG for additional messages on UART line to ESP
 
+ifneq (DEBUG,)
+	EXTRA_DEFINES += -DDEBUG
+endif
+
 INCLUDES=
 CFLAGS=-ffunction-sections -fdata-sections $(INCLUDES) $(EXTRA_DEFINES)
 LD_FLAGS=-Wl,--gc-sections

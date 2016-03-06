@@ -20,9 +20,14 @@ enum {
 
 extern UartDevice UartDev;
 
+ETSTimer frame_watchdog_timer;
+uint32_t timer_10s = 0;
+uint32_t last_message_time_10s = 0;
+
 os_event_t    avr_procQueue[AVR_PROC_Q_LEN];
 char 	      msg_buf[MSG_BUF_SIZE] = "";
 char 	      msg_idx = 0;
+
 
 avr_msg_callback msg_cb = NULL;
 
@@ -60,6 +65,7 @@ static void ICACHE_FLASH_ATTR add_to_msg(char c) {
 static void ICACHE_FLASH_ATTR avr_msg_handler(os_event_t *events) {
      int c;
      do {
+	  last_message_time_10s = timer_10s;
 	  c = uart0_rx_one_char();
 #ifdef DEBUG
 	  os_printf("Ping (%c) State = %d, %d\r\n", c != -1 ? c : '.',
@@ -145,7 +151,20 @@ void avr_reg_msg_callback(avr_msg_callback cb) {
 	  msg_cb = avr_msg_callback_default;
 }
 
+void frame_watchdog_timer_fn (void *arg) {
+     if (timer_10s > last_message_time_10s) {
+	  if ((timer_10s - last_message_time_10s) > 1) {
+	       msg_state = START;
+	       os_printf("Reset state to START (%d/%d)\r\n", timer_10s, last_message_time_10s);
+	  }
+     }
+     timer_10s ++;
+}
+
 void avr_init_task () {
+     os_timer_setfn(&frame_watchdog_timer, frame_watchdog_timer_fn, NULL);
+     os_timer_arm(&frame_watchdog_timer, 10000, 1);
+
      msg_cb = avr_msg_callback_default;
      system_os_task(avr_msg_handler, AVR_PROC_PRIO, avr_procQueue, AVR_PROC_Q_LEN);
 }
