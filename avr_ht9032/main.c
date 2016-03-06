@@ -27,6 +27,7 @@
 #define _PIN      PINB
 #define RING_BIT _BV(PB1)
 #define DATA_BIT _BV(PB2)
+#define DATA_SHIFT_TO_D7 5
 #define DEB_BIT  _BV(PB0)
 #define UART_BIT _BV(PB4)
 #endif
@@ -37,6 +38,7 @@
 #define _PIN      PINA
 #define RING_BIT _BV(PA1)
 #define DATA_BIT _BV(PA2)
+#define DATA_SHIFT_TO_D7 5
 #define DEB_BIT  _BV(PB3)
 #define UART_BIT _BV(PB0)
 #endif
@@ -129,8 +131,7 @@ struct t_cnd_msg {
   char number[16];
 
   byte cksum;
-}
-cnd_msg;
+} cnd_msg;
 
 int parse_cnd_msg(byte *buf, byte len, struct t_cnd_msg *msg) {
   byte *bp = buf;
@@ -180,42 +181,18 @@ Error:
   return 0;
 }
 
-/* The first ring check logic runs right over the siezure bits, so its kinda pointless */
-void doSeizure() {
-  byte v, oldv = 0x4;
-  byte bits = 0;
-
-  printf_P(PSTR("Waiting.\r\n"));
-
-  _PORT &= DEB_OFF;
-
-  while (_PIN & DATA_BIT);
-  _PORT |= DEB_ON;
-
-  printf_P(PSTR("Siezure\r\n"));
-  do {
-    v = _PIN & DATA_BIT;
-    bits += ((v ^ oldv)>>2);
-    oldv = v;
-  }
-  while (bits < 10);
-
-  _PORT &= DEB_OFF;
-
-  _delay_ms(150);
-
-  _PORT |= DEB_ON;
-}
-
 struct t_cnd_msg msg;
 byte buf[32];
 
+/* This function is called around the time the signal is in the (Mark)
+ * stretch of '1's */
 void getClip () {
   byte *bp = buf;
   byte len = 0;
   int stc;
 
   memset(buf, 0, 32);
+  /* Wait for the start of data */
   while (_PIN & DATA_BIT);
 
   do {
@@ -230,12 +207,18 @@ void getClip () {
       delayMicroseconds(415);
 
       _PORT |= DEB_ON;
+
+      /* Sample once, happenstance */
       aux = (_PIN & DATA_BIT);
       delayMicroseconds(210);
+
+      /* Sample twice, coincidence */
       aux |= (_PIN & DATA_BIT);
       delayMicroseconds(201);
-      aux |= (_PIN & DATA_BIT);
-      v = (v >> 1) | (aux << 5);
+
+      /* Sample thrice, enemy action */
+      /* aux |= (_PIN & DATA_BIT); */
+      v = (v >> 1) | (aux << DATA_SHIFT_TO_D7);
     }
 
     *bp = v;
@@ -248,14 +231,17 @@ void getClip () {
     delayMicroseconds(415);
 
     stc = 0;
+    /* No more bits coming if FSK demod output stays high long enough */
     while ((_PIN & DATA_BIT) && (stc < 1200)) stc++;
     if (stc > 1200) {
 	 printf_P(PSTR("stc = %d\r\n"), stc);
     }
   }
-  while (stc < 1200);
+  while ((stc < 1200) && (len < 32));
   *bp = 0;
 
+  /* Jump over some additional bits I found few milliseconds later,
+   * have to check whats in them */
   delay(200);
   while (!(_PIN & DATA_BIT));
 
@@ -263,9 +249,12 @@ void getClip () {
   printf("Len = %d\r\n", len);
   dump_hex("Stuff", buf, len);
 #endif
+
   if (parse_cnd_msg(buf, len, &msg)) {
-    /* The message */
+    /* Frame (wrap it in ++ and --) and send the message over to the
+     * other guy (ESP8266) */
     printf_P(PSTR("++0,%d,%d,%d,%d,%s--"), msg.month, msg.day, msg.hour, msg.minute, msg.number);
+
 #ifdef DEBUG
     printf_P(PSTR("\nTimestamp = %02d - %02d : %02d:%02d hours\r\n"), msg.month, msg.day, msg.hour, msg.minute);
     printf_P(PSTR("Calling line number = %s\r\n"), msg.number);
@@ -273,7 +262,9 @@ void getClip () {
 #endif
   }
   else {
+#ifdef DEBUG
     printf_P(PSTR("Parse failed (Len = %d)\r\n"), len);
+#endif
     printf_P(PSTR("++1,Parse failed--"));
   }
 }
@@ -284,7 +275,7 @@ long last_call_last_ring = 0;
 void waitForFirstRing() {
   byte isFirst = 0;
 
-  printf_P(PSTR("Wait.. isFirst = %d\n"), isFirst);
+  printf_P(PSTR("\nWait.. isFirst = %d\n"), isFirst);
   while (!isFirst) {
     uint8_t wakeup_timer = 0;
     _PORT &= DEB_OFF;
@@ -321,12 +312,16 @@ void waitForFirstRing() {
         last_call_first_ring = s;
         _PORT &= DEB_OFF;
         isFirst = 1;
+#ifdef DEBUG
 	printf_P(PSTR("RING (First)\n"));
+#endif
       }
       else {
         _delay_us(20);
         _PORT &= DEB_OFF;
+#ifdef DEBUG
 	printf_P(PSTR("RING\n"));
+#endif
       }
       last_call_last_ring = s;
     }
@@ -342,5 +337,9 @@ void loop ()
 
 int main () {
      setup ();
+     /* Rudimentary start up indicator : short flash of the LED */
+     _PORT |= DEB_ON;
+     _delay_ms(100);
+     _PORT &= DEB_OFF;
      while (1) loop();
 }
